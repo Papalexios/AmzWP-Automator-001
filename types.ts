@@ -25,6 +25,13 @@ export interface AppConfig {
   
   aiProvider: AIProvider;
   aiModel: string;
+  
+  geminiApiKey?: string;
+  openaiApiKey?: string;
+  anthropicApiKey?: string;
+  groqApiKey?: string;
+  openrouterApiKey?: string;
+  customModel?: string;
 }
 
 export interface ProductDetails {

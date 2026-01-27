@@ -98,20 +98,106 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({ onSave, initialConfig 
 
             {activeTab === 'ai' && (
                 <div className="space-y-4 animate-fade-in">
-                    <select className="w-full bg-dark-950 border border-dark-700 rounded-xl px-4 py-3 text-white outline-none" value={config.aiProvider} onChange={e => setConfig({...config, aiProvider: e.target.value as AIProvider})}>
-                        <option value="gemini">Google Gemini</option>
-                        <option value="openai">OpenAI (Coming Soon)</option>
-                    </select>
-                    {/* FIXED: Use correct Gemini model names */}
-                    <select className="w-full bg-dark-950 border border-dark-700 rounded-xl px-4 py-3 text-white outline-none" value={config.aiModel} onChange={e => setConfig({...config, aiModel: e.target.value})}>
-                        <option value="gemini-2.0-flash">Gemini 2.0 Flash (Recommended)</option>
-                        <option value="gemini-1.5-flash">Gemini 1.5 Flash (Fallback)</option>
-                        <option value="gemini-1.5-pro">Gemini 1.5 Pro (High Quality)</option>
-                    </select>
+                    <div>
+                        <label className="text-[10px] text-brand-500 font-black uppercase tracking-widest mb-2 block">AI Provider</label>
+                        <select className="w-full bg-dark-950 border border-dark-700 rounded-xl px-4 py-3 text-white outline-none" value={config.aiProvider} onChange={e => setConfig({...config, aiProvider: e.target.value as AIProvider, aiModel: ''})}>
+                            <option value="gemini">Google Gemini</option>
+                            <option value="openai">OpenAI</option>
+                            <option value="anthropic">Anthropic Claude</option>
+                            <option value="groq">Groq</option>
+                            <option value="openrouter">OpenRouter</option>
+                        </select>
+                    </div>
+
+                    {config.aiProvider === 'gemini' && (
+                        <>
+                            <div>
+                                <label className="text-[10px] text-brand-500 font-black uppercase tracking-widest mb-2 block">Gemini API Key</label>
+                                <input type="password" className="w-full bg-dark-950 border border-dark-700 rounded-xl px-4 py-3 text-white outline-none" placeholder="Enter Gemini API Key" value={config.geminiApiKey || ''} onChange={e => setConfig({...config, geminiApiKey: e.target.value})} />
+                            </div>
+                            <select className="w-full bg-dark-950 border border-dark-700 rounded-xl px-4 py-3 text-white outline-none" value={config.aiModel} onChange={e => setConfig({...config, aiModel: e.target.value})}>
+                                <option value="gemini-2.0-flash">Gemini 2.0 Flash (Recommended)</option>
+                                <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
+                                <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
+                            </select>
+                        </>
+                    )}
+
+                    {config.aiProvider === 'openai' && (
+                        <>
+                            <div>
+                                <label className="text-[10px] text-brand-500 font-black uppercase tracking-widest mb-2 block">OpenAI API Key</label>
+                                <input type="password" className="w-full bg-dark-950 border border-dark-700 rounded-xl px-4 py-3 text-white outline-none" placeholder="Enter OpenAI API Key" value={config.openaiApiKey || ''} onChange={e => setConfig({...config, openaiApiKey: e.target.value})} />
+                            </div>
+                            <select className="w-full bg-dark-950 border border-dark-700 rounded-xl px-4 py-3 text-white outline-none" value={config.aiModel} onChange={e => setConfig({...config, aiModel: e.target.value})}>
+                                <option value="gpt-4o">GPT-4o (Recommended)</option>
+                                <option value="gpt-4o-mini">GPT-4o Mini</option>
+                                <option value="gpt-4-turbo">GPT-4 Turbo</option>
+                                <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+                            </select>
+                        </>
+                    )}
+
+                    {config.aiProvider === 'anthropic' && (
+                        <>
+                            <div>
+                                <label className="text-[10px] text-brand-500 font-black uppercase tracking-widest mb-2 block">Anthropic API Key</label>
+                                <input type="password" className="w-full bg-dark-950 border border-dark-700 rounded-xl px-4 py-3 text-white outline-none" placeholder="Enter Anthropic API Key" value={config.anthropicApiKey || ''} onChange={e => setConfig({...config, anthropicApiKey: e.target.value})} />
+                            </div>
+                            <select className="w-full bg-dark-950 border border-dark-700 rounded-xl px-4 py-3 text-white outline-none" value={config.aiModel} onChange={e => setConfig({...config, aiModel: e.target.value})}>
+                                <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet (Recommended)</option>
+                                <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku</option>
+                                <option value="claude-3-opus-20240229">Claude 3 Opus</option>
+                            </select>
+                        </>
+                    )}
+
+                    {config.aiProvider === 'groq' && (
+                        <>
+                            <div>
+                                <label className="text-[10px] text-brand-500 font-black uppercase tracking-widest mb-2 block">Groq API Key</label>
+                                <input type="password" className="w-full bg-dark-950 border border-dark-700 rounded-xl px-4 py-3 text-white outline-none" placeholder="Enter Groq API Key" value={config.groqApiKey || ''} onChange={e => setConfig({...config, groqApiKey: e.target.value})} />
+                            </div>
+                            <div>
+                                <label className="text-[10px] text-brand-500 font-black uppercase tracking-widest mb-2 block">Model (Custom)</label>
+                                <input type="text" className="w-full bg-dark-950 border border-dark-700 rounded-xl px-4 py-3 text-white outline-none" placeholder="e.g. llama-3.3-70b-versatile" value={config.customModel || ''} onChange={e => setConfig({...config, customModel: e.target.value})} />
+                            </div>
+                            <div className="p-4 bg-purple-500/10 border border-purple-500/30 rounded-xl">
+                              <p className="text-xs text-purple-400">
+                                <i className="fa-solid fa-bolt mr-2"></i>
+                                Enter any Groq model name. Popular: llama-3.3-70b-versatile, mixtral-8x7b-32768
+                              </p>
+                            </div>
+                        </>
+                    )}
+
+                    {config.aiProvider === 'openrouter' && (
+                        <>
+                            <div>
+                                <label className="text-[10px] text-brand-500 font-black uppercase tracking-widest mb-2 block">OpenRouter API Key</label>
+                                <input type="password" className="w-full bg-dark-950 border border-dark-700 rounded-xl px-4 py-3 text-white outline-none" placeholder="Enter OpenRouter API Key" value={config.openrouterApiKey || ''} onChange={e => setConfig({...config, openrouterApiKey: e.target.value})} />
+                            </div>
+                            <div>
+                                <label className="text-[10px] text-brand-500 font-black uppercase tracking-widest mb-2 block">Model (Custom)</label>
+                                <input type="text" className="w-full bg-dark-950 border border-dark-700 rounded-xl px-4 py-3 text-white outline-none" placeholder="e.g. anthropic/claude-3.5-sonnet" value={config.customModel || ''} onChange={e => setConfig({...config, customModel: e.target.value})} />
+                            </div>
+                            <div className="p-4 bg-orange-500/10 border border-orange-500/30 rounded-xl">
+                              <p className="text-xs text-orange-400">
+                                <i className="fa-solid fa-globe mr-2"></i>
+                                Enter any OpenRouter model. Examples: anthropic/claude-3.5-sonnet, google/gemini-pro, meta-llama/llama-3.1-70b-instruct
+                              </p>
+                            </div>
+                        </>
+                    )}
+
                     <div className="p-4 bg-blue-500/10 border border-blue-500/30 rounded-xl">
                       <p className="text-xs text-blue-400">
                         <i className="fa-solid fa-info-circle mr-2"></i>
-                        Gemini 2.0 Flash provides the best balance of speed and accuracy for product extraction.
+                        {config.aiProvider === 'gemini' && 'Gemini 2.0 Flash provides the best balance of speed and accuracy.'}
+                        {config.aiProvider === 'openai' && 'GPT-4o is recommended for highest quality product extraction.'}
+                        {config.aiProvider === 'anthropic' && 'Claude 3.5 Sonnet offers excellent reasoning and accuracy.'}
+                        {config.aiProvider === 'groq' && 'Groq provides ultra-fast inference for supported models.'}
+                        {config.aiProvider === 'openrouter' && 'OpenRouter gives you access to 100+ models from one API.'}
                       </p>
                     </div>
                 </div>
