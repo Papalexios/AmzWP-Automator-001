@@ -1422,6 +1422,147 @@ const generateDynamicVerdict = (productName: string, brand: string, category: st
 };
 
 // ============================================================================
+// MULTI-PROVIDER AI ENGINE
+// ============================================================================
+
+interface AIResponse {
+  text: string;
+  provider: string;
+}
+
+const callAIProvider = async (
+  config: AppConfig,
+  systemPrompt: string,
+  userPrompt: string
+): Promise<AIResponse | null> => {
+  const provider = config.aiProvider;
+  
+  try {
+    switch (provider) {
+      case 'gemini': {
+        const apiKey = config.geminiApiKey || process.env.API_KEY;
+        if (!apiKey) throw new Error('Gemini API key not configured');
+        
+        const ai = new GoogleGenAI({ apiKey });
+        const response = await ai.models.generateContent({
+          model: config.aiModel || 'gemini-2.0-flash',
+          contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+          config: {
+            systemInstruction: systemPrompt,
+            responseMimeType: 'application/json',
+          },
+        });
+        return { text: response?.text || '', provider: 'gemini' };
+      }
+
+      case 'openai': {
+        const apiKey = config.openaiApiKey;
+        if (!apiKey) throw new Error('OpenAI API key not configured');
+        
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model: config.aiModel || 'gpt-4o',
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userPrompt },
+            ],
+            response_format: { type: 'json_object' },
+          }),
+        });
+        const data = await response.json();
+        if (data.error) throw new Error(data.error.message);
+        return { text: data.choices?.[0]?.message?.content || '', provider: 'openai' };
+      }
+
+      case 'anthropic': {
+        const apiKey = config.anthropicApiKey;
+        if (!apiKey) throw new Error('Anthropic API key not configured');
+        
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01',
+          },
+          body: JSON.stringify({
+            model: config.aiModel || 'claude-3-5-sonnet-20241022',
+            max_tokens: 4096,
+            system: systemPrompt,
+            messages: [{ role: 'user', content: userPrompt }],
+          }),
+        });
+        const data = await response.json();
+        if (data.error) throw new Error(data.error.message);
+        return { text: data.content?.[0]?.text || '', provider: 'anthropic' };
+      }
+
+      case 'groq': {
+        const apiKey = config.groqApiKey;
+        if (!apiKey) throw new Error('Groq API key not configured');
+        
+        const model = config.customModel || 'llama-3.3-70b-versatile';
+        const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userPrompt },
+            ],
+            response_format: { type: 'json_object' },
+          }),
+        });
+        const data = await response.json();
+        if (data.error) throw new Error(data.error.message);
+        return { text: data.choices?.[0]?.message?.content || '', provider: 'groq' };
+      }
+
+      case 'openrouter': {
+        const apiKey = config.openrouterApiKey;
+        if (!apiKey) throw new Error('OpenRouter API key not configured');
+        
+        const model = config.customModel || 'anthropic/claude-3.5-sonnet';
+        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+            'HTTP-Referer': 'https://amzpilot.app',
+          },
+          body: JSON.stringify({
+            model,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userPrompt },
+            ],
+            response_format: { type: 'json_object' },
+          }),
+        });
+        const data = await response.json();
+        if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+        return { text: data.choices?.[0]?.message?.content || '', provider: 'openrouter' };
+      }
+
+      default:
+        throw new Error(`Unknown AI provider: ${provider}`);
+    }
+  } catch (error: any) {
+    console.error(`[AI] ${provider} error:`, error.message);
+    throw error;
+  }
+};
+
+// ============================================================================
 // ULTRA-RELIABLE AI ANALYSIS ENGINE
 // ============================================================================
 
@@ -1458,14 +1599,12 @@ export const analyzeContentAndFindProduct = async (
   // STEP 2: AI ENHANCEMENT (Optional - improves results but not required)
   // ═══════════════════════════════════════════════════════════════════════════
 
-  const apiKey = process.env.API_KEY;
+  const hasAnyApiKey = config.geminiApiKey || config.openaiApiKey || config.anthropicApiKey || 
+                       config.groqApiKey || config.openrouterApiKey || process.env.API_KEY;
   let aiProducts: any[] = [];
 
-  if (apiKey) {
+  if (hasAnyApiKey) {
     try {
-      const ai = new GoogleGenAI({ apiKey });
-      
-      // Clean content for AI
       const context = (htmlContent || '')
         .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
         .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
@@ -1494,18 +1633,16 @@ VERDICT RULES:
 
 Return JSON: {"products":[...]}`;
 
-      const response = await ai.models.generateContent({
-        model: config.aiModel || 'gemini-2.0-flash',
-        contents: [{ role: 'user', parts: [{ text: `Title: "${title}"\n\nContent: ${context}` }] }],
-        config: {
-          systemInstruction: systemPrompt,
-          responseMimeType: 'application/json',
-        },
-      });
+      const userPrompt = `Title: "${title}"\n\nContent: ${context}`;
+      
+      console.log(`[SCAN] Using AI provider: ${config.aiProvider}`);
+      const response = await callAIProvider(config, systemPrompt, userPrompt);
 
-      const data = cleanAndParseJSON(response?.text || '');
-      aiProducts = data.products || [];
-      console.log(`[SCAN] AI found ${aiProducts.length} additional products`);
+      if (response) {
+        const data = cleanAndParseJSON(response.text);
+        aiProducts = data.products || [];
+        console.log(`[SCAN] ${response.provider} found ${aiProducts.length} additional products`);
+      }
       
     } catch (e: any) {
       console.warn('[SCAN] AI enhancement failed, using pre-extracted only:', e.message);
