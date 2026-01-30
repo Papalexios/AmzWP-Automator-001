@@ -1981,25 +1981,7 @@ export const analyzeContentAndFindProduct = async (
   }
 };
 
-/**
- * Generate default verdict text
- */
-const generateDefaultVerdict = (productTitle: string): string => {
-  const name = productTitle.split(' ').slice(0, 4).join(' ');
-  return `Engineered for users who demand excellence, the ${name} delivers professional-grade performance with meticulous attention to detail. Backed by thousands of verified reviews and trusted by industry professionals worldwide.`;
-};
 
-/**
- * Generate default evidence claims
- */
-const generateDefaultClaims = (): string[] => {
-  return [
-    'Premium build quality with attention to detail',
-    'Industry-leading performance metrics',
-    'Backed by comprehensive warranty',
-    'Trusted by thousands of verified buyers',
-  ];
-};
 
 /**
  * Generate default FAQs
