@@ -1,6 +1,14 @@
 /**
  * ============================================================================
- * SitemapScanner | Enterprise Sitemap Discovery v90.0 (FIXED)
+ * SitemapScanner | Enterprise Content Discovery v100.0
+ * ============================================================================
+ * Features:
+ * - Multiple discovery methods (Sitemap, WP API, Manual)
+ * - Real-time progress feedback
+ * - Smart error handling with actionable suggestions
+ * - Filtering and search
+ * - Batch processing integration
+ * - Deep content audit
  * ============================================================================
  */
 
@@ -8,13 +16,14 @@ import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react'
 import { BlogPost, AppConfig, SitemapState } from '../types';
 import { 
   fetchAndParseSitemap, 
+  fetchPostsFromWordPressAPI,
   validateManualUrl, 
   createBlogPostFromUrl,
   calculatePostPriority,
   fetchPageContent,
+  getProxyStats,
 } from '../utils';
 import Toastify from 'toastify-js';
-import { BatchProcessor } from './BatchProcessor';
 
 // ============================================================================
 // TYPES
@@ -28,18 +37,19 @@ interface SitemapScannerProps {
 }
 
 type ScanStatus = 'idle' | 'scanning' | 'auditing' | 'complete' | 'error';
+type DiscoveryMethod = 'sitemap' | 'wordpress' | 'manual';
 type FilterTab = 'all' | 'critical' | 'high' | 'medium' | 'low' | 'monetized';
 
 // ============================================================================
-// HELPER: Show Toast
+// TOAST HELPER
 // ============================================================================
 
 const showToast = (message: string, type: 'success' | 'error' | 'warning' | 'info' = 'info') => {
   const colors = {
-    success: '#10b981',
-    error: '#ef4444',
-    warning: '#f59e0b',
-    info: '#3b82f6',
+    success: 'linear-gradient(135deg, #10b981, #059669)',
+    error: 'linear-gradient(135deg, #ef4444, #dc2626)',
+    warning: 'linear-gradient(135deg, #f59e0b, #d97706)',
+    info: 'linear-gradient(135deg, #3b82f6, #2563eb)',
   };
   
   Toastify({
@@ -49,14 +59,15 @@ const showToast = (message: string, type: 'success' | 'error' | 'warning' | 'inf
     position: 'right',
     style: {
       background: colors[type],
-      borderRadius: '12px',
+      borderRadius: '16px',
       fontWeight: 'bold',
+      boxShadow: '0 10px 40px rgba(0,0,0,0.3)',
     },
   }).showToast();
 };
 
 // ============================================================================
-// COMPONENT
+// MAIN COMPONENT
 // ============================================================================
 
 export const SitemapScanner: React.FC<SitemapScannerProps> = ({
@@ -73,9 +84,9 @@ export const SitemapScanner: React.FC<SitemapScannerProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [showManualAdd, setShowManualAdd] = useState(false);
   const [manualUrl, setManualUrl] = useState('');
-  const [showBatchProcessor, setShowBatchProcessor] = useState(false);
-  const [auditProgress, setAuditProgress] = useState({ current: 0, total: 0 });
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [auditProgress, setAuditProgress] = useState({ current: 0, total: 0 });
+  const [discoveryMethod, setDiscoveryMethod] = useState<DiscoveryMethod>('sitemap');
 
   // ========== REFS ==========
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -89,13 +100,12 @@ export const SitemapScanner: React.FC<SitemapScannerProps> = ({
         lastScanned: Date.now(),
       });
     }
-  }, [posts, sitemapUrl, onStateChange]);
+  }, [posts, sitemapUrl]);
 
   // ========== FILTERED POSTS ==========
   const filteredPosts = useMemo(() => {
     let result = [...posts];
 
-    // Filter by tab
     if (filterTab !== 'all') {
       if (filterTab === 'monetized') {
         result = result.filter(p => p.monetizationStatus === 'monetized');
@@ -104,7 +114,6 @@ export const SitemapScanner: React.FC<SitemapScannerProps> = ({
       }
     }
 
-    // Filter by search
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
       result = result.filter(p => 
@@ -126,115 +135,68 @@ export const SitemapScanner: React.FC<SitemapScannerProps> = ({
     monetized: posts.filter(p => p.monetizationStatus === 'monetized').length,
   }), [posts]);
 
-  // ========== MAIN FETCH HANDLER ==========
-  const handleFetch = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
+  // ========== SITEMAP DISCOVERY ==========
+  const handleSitemapFetch = async () => {
     const trimmedUrl = sitemapUrl.trim();
     if (!trimmedUrl) {
       showToast('Please enter a domain or sitemap URL', 'warning');
       return;
     }
 
-    // Cancel any existing operation
     abortControllerRef.current?.abort();
     abortControllerRef.current = new AbortController();
 
     setStatus('scanning');
     setErrorMessage(null);
     
-    console.log('[SitemapScanner] Starting fetch for:', trimmedUrl);
+    console.log('[Scanner] Starting sitemap discovery for:', trimmedUrl);
 
     try {
       const discoveredPosts = await fetchAndParseSitemap(trimmedUrl, config);
       
-      console.log('[SitemapScanner] Discovered posts:', discoveredPosts.length);
+      console.log('[Scanner] Discovered posts:', discoveredPosts.length);
       
       if (discoveredPosts.length === 0) {
-        throw new Error('No posts found in sitemap');
+        throw new Error('No posts found');
       }
       
       setPosts(discoveredPosts);
       setStatus('complete');
-      
       showToast(`✓ Found ${discoveredPosts.length} pages!`, 'success');
       
-      // Auto-run deep audit if reasonable number of posts
-      if (discoveredPosts.length > 0 && discoveredPosts.length <= 100) {
-        runDeepAudit(discoveredPosts);
-      }
-      
     } catch (error: any) {
-      console.error('[SitemapScanner] Fetch error:', error);
-      
-      const message = error.message || 'Unknown error occurred';
-      setErrorMessage(message);
+      console.error('[Scanner] Error:', error);
+      setErrorMessage(error.message || 'Discovery failed');
       setStatus('error');
-      
-      // More helpful error messages
-      if (message.includes('All proxies failed')) {
-        showToast('Network error: Unable to reach the sitemap. The site may be blocking requests. Try "Add URL Manually" instead.', 'error');
-      } else if (message.includes('No sitemap found')) {
-        showToast(message, 'warning');
-      } else {
-        showToast(`Scan Failed: ${message.substring(0, 100)}`, 'error');
-      }
+      showToast('Discovery failed - see error details below', 'error');
     }
   };
 
-  // ========== DEEP AUDIT ==========
-  const runDeepAudit = async (postsToAudit: BlogPost[]) => {
-    if (postsToAudit.length === 0) return;
-    
-    setStatus('auditing');
-    setAuditProgress({ current: 0, total: postsToAudit.length });
-    
-    const updatedPosts = [...postsToAudit];
-    const concurrency = Math.min(config.concurrencyLimit || 3, 5);
-    
-    let completed = 0;
-    
-    const processPost = async (index: number) => {
-      const post = updatedPosts[index];
-      
-      try {
-        // Fetch content for priority analysis
-        const { content } = await fetchPageContent(config, post.url);
-        
-        // Calculate priority based on content
-        const { priority, type, status: monetizationStatus } = calculatePostPriority(
-          post.title,
-          content
-        );
-        
-        updatedPosts[index] = {
-          ...post,
-          priority,
-          postType: type,
-          monetizationStatus,
-        };
-      } catch {
-        // Keep default priority on error
-      }
-      
-      completed++;
-      setAuditProgress({ current: completed, total: postsToAudit.length });
-    };
-
-    // Process in batches
-    for (let i = 0; i < postsToAudit.length; i += concurrency) {
-      const batch = [];
-      for (let j = i; j < Math.min(i + concurrency, postsToAudit.length); j++) {
-        batch.push(processPost(j));
-      }
-      await Promise.all(batch);
+  // ========== WORDPRESS API DISCOVERY ==========
+  const handleWordPressAPI = async () => {
+    if (!config.wpUrl || !config.wpUser || !config.wpAppPassword) {
+      showToast('Configure WordPress credentials first (click ⚙️ icon)', 'warning');
+      return;
     }
 
-    setPosts(updatedPosts);
-    setStatus('complete');
-    
-    const opportunities = updatedPosts.filter(p => p.monetizationStatus === 'opportunity').length;
-    showToast(`Audit complete: ${opportunities} monetization opportunities found`, 'success');
+    setStatus('scanning');
+    setErrorMessage(null);
+    setDiscoveryMethod('wordpress');
+
+    try {
+      const discoveredPosts = await fetchPostsFromWordPressAPI(config);
+      
+      setPosts(discoveredPosts);
+      setSitemapUrl(config.wpUrl);
+      setStatus('complete');
+      showToast(`✓ Found ${discoveredPosts.length} posts via WordPress API!`, 'success');
+      
+    } catch (error: any) {
+      console.error('[WordPress API] Error:', error);
+      setErrorMessage(`WordPress API Error: ${error.message}`);
+      setStatus('error');
+      showToast('WordPress API failed - check credentials', 'error');
+    }
   };
 
   // ========== MANUAL ADD ==========
@@ -246,9 +208,8 @@ export const SitemapScanner: React.FC<SitemapScannerProps> = ({
       return;
     }
 
-    // Check for duplicates
     if (posts.some(p => p.url.toLowerCase() === validation.normalizedUrl.toLowerCase())) {
-      showToast('This URL is already in the list', 'warning');
+      showToast('URL already in list', 'warning');
       return;
     }
 
@@ -256,95 +217,96 @@ export const SitemapScanner: React.FC<SitemapScannerProps> = ({
     setPosts(prev => [newPost, ...prev]);
     setManualUrl('');
     setShowManualAdd(false);
-    
     showToast('URL added successfully', 'success');
   };
 
-  // ========== ALTERNATIVE: TRY WORDPRESS API ==========
-  const tryWordPressAPI = async () => {
-    if (!config.wpUrl || !config.wpUser || !config.wpAppPassword) {
-      showToast('Configure WordPress credentials first (click gear icon)', 'warning');
-      return;
+  // ========== DEEP AUDIT ==========
+  const runDeepAudit = async () => {
+    if (posts.length === 0) return;
+    
+    setStatus('auditing');
+    setAuditProgress({ current: 0, total: posts.length });
+    
+    const updatedPosts = [...posts];
+    let completed = 0;
+
+    for (let i = 0; i < updatedPosts.length; i++) {
+      try {
+        const { content } = await fetchPageContent(config, updatedPosts[i].url);
+        const { priority, type, status: monetizationStatus } = calculatePostPriority(
+          updatedPosts[i].title,
+          content
+        );
+        
+        updatedPosts[i] = {
+          ...updatedPosts[i],
+          priority,
+          postType: type,
+          monetizationStatus,
+        };
+      } catch {}
+      
+      completed++;
+      setAuditProgress({ current: completed, total: posts.length });
     }
 
-    setStatus('scanning');
-    setErrorMessage(null);
+    setPosts(updatedPosts);
+    setStatus('complete');
+    showToast('Content audit complete!', 'success');
+  };
 
-    try {
-      const apiBase = config.wpUrl.replace(/\/$/, '') + '/wp-json/wp/v2';
-      const auth = btoa(`${config.wpUser}:${config.wpAppPassword}`);
-      
-      // Fetch posts from WordPress API
-      const response = await fetch(`${apiBase}/posts?per_page=100&status=publish`, {
-        headers: { 'Authorization': `Basic ${auth}` },
-      });
-
-      if (!response.ok) {
-        throw new Error(`WordPress API error: ${response.status}`);
-      }
-
-      const wpPosts = await response.json();
-      
-      if (wpPosts.length === 0) {
-        throw new Error('No published posts found');
-      }
-
-      const discoveredPosts: BlogPost[] = wpPosts.map((p: any, index: number) => ({
-        id: p.id,
-        title: p.title?.rendered || 'Untitled',
-        url: p.link,
-        postType: 'post',
-        priority: 'medium' as const,
-        monetizationStatus: 'opportunity' as const,
-      }));
-
-      setPosts(discoveredPosts);
-      setSitemapUrl(config.wpUrl);
-      setStatus('complete');
-      
-      showToast(`✓ Found ${discoveredPosts.length} posts via WordPress API`, 'success');
-      
-      // Run audit
-      runDeepAudit(discoveredPosts);
-      
-    } catch (error: any) {
-      console.error('[WordPress API] Error:', error);
-      setStatus('error');
-      setErrorMessage(error.message);
-      showToast(`WordPress API error: ${error.message}`, 'error');
-    }
+  // ========== DEBUG INFO ==========
+  const showDebugInfo = () => {
+    const stats = getProxyStats();
+    console.log('[Debug] Proxy Statistics:', stats);
+    alert(`Proxy Statistics:\n${JSON.stringify(stats, null, 2)}`);
   };
 
   // ========== RENDER ==========
   return (
     <div className="h-full flex flex-col bg-dark-950">
-      {/* Header */}
+      {/* ========== HEADER ========== */}
       <header className="flex-shrink-0 p-6 md:p-8 border-b border-dark-800 bg-dark-900/50">
         <div className="max-w-6xl mx-auto">
-          <h1 className="text-3xl md:text-4xl font-black text-white tracking-tight mb-2">
-            Content Discovery
-          </h1>
-          <p className="text-gray-500 text-sm">
-            Scan your sitemap to find monetization opportunities
-          </p>
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h1 className="text-3xl md:text-4xl font-black text-white tracking-tight">
+                Content Discovery
+              </h1>
+              <p className="text-gray-500 text-sm mt-1">
+                Find and analyze your content for monetization opportunities
+              </p>
+            </div>
+            
+            {/* Debug Button */}
+            <button
+              onClick={showDebugInfo}
+              className="text-gray-600 hover:text-gray-400 text-xs"
+              title="Show debug info"
+            >
+              <i className="fa-solid fa-bug" />
+            </button>
+          </div>
           
-          {/* Search Form */}
-          <form onSubmit={handleFetch} className="mt-6 flex gap-3 flex-wrap">
-            <div className="flex-1 min-w-[300px]">
+          {/* ========== SEARCH FORM ========== */}
+          <div className="flex gap-3 flex-wrap">
+            <div className="flex-1 min-w-[280px]">
               <input
                 type="text"
                 value={sitemapUrl}
                 onChange={e => setSitemapUrl(e.target.value)}
-                placeholder="Enter domain (e.g., example.com) or sitemap URL"
+                placeholder="Enter domain (example.com) or full sitemap URL"
                 className="w-full bg-dark-800 border border-dark-700 rounded-2xl px-6 py-4 text-white placeholder-gray-500 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none transition-all"
                 disabled={status === 'scanning' || status === 'auditing'}
+                onKeyDown={e => e.key === 'Enter' && handleSitemapFetch()}
               />
             </div>
             
+            {/* Sitemap Discover Button */}
             <button
-              type="submit"
+              onClick={handleSitemapFetch}
               disabled={status === 'scanning' || status === 'auditing' || !sitemapUrl.trim()}
-              className="px-8 py-4 bg-gradient-to-r from-brand-600 to-purple-600 hover:from-brand-500 hover:to-purple-500 text-white font-black rounded-2xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shadow-xl"
+              className="px-8 py-4 bg-gradient-to-r from-brand-600 to-purple-600 hover:from-brand-500 hover:to-purple-500 text-white font-black rounded-2xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shadow-xl hover:shadow-brand-500/25"
             >
               {status === 'scanning' ? (
                 <>
@@ -358,72 +320,86 @@ export const SitemapScanner: React.FC<SitemapScannerProps> = ({
                 </>
               ) : (
                 <>
-                  <i className="fa-solid fa-radar" />
+                  <i className="fa-solid fa-satellite-dish" />
                   Discover
                 </>
               )}
             </button>
 
-            {/* Alternative buttons */}
+            {/* WordPress API Button */}
             <button
-              type="button"
-              onClick={tryWordPressAPI}
+              onClick={handleWordPressAPI}
               disabled={status === 'scanning' || status === 'auditing'}
-              className="px-6 py-4 bg-dark-800 hover:bg-dark-700 text-white font-bold rounded-2xl transition-all border border-dark-700 disabled:opacity-50 flex items-center gap-2"
-              title="Fetch posts directly from WordPress API"
+              className="px-6 py-4 bg-dark-800 hover:bg-dark-700 text-white font-bold rounded-2xl transition-all border border-dark-700 hover:border-brand-500/50 disabled:opacity-50 flex items-center gap-2"
+              title="Fetch posts directly from WordPress REST API"
             >
-              <i className="fa-brands fa-wordpress" />
+              <i className="fa-brands fa-wordpress text-lg" />
               <span className="hidden md:inline">WP API</span>
             </button>
 
+            {/* Manual Add Button */}
             <button
-              type="button"
               onClick={() => setShowManualAdd(true)}
               disabled={status === 'scanning' || status === 'auditing'}
-              className="px-6 py-4 bg-dark-800 hover:bg-dark-700 text-white font-bold rounded-2xl transition-all border border-dark-700 disabled:opacity-50 flex items-center gap-2"
+              className="px-6 py-4 bg-dark-800 hover:bg-dark-700 text-white font-bold rounded-2xl transition-all border border-dark-700 hover:border-green-500/50 disabled:opacity-50 flex items-center gap-2"
             >
               <i className="fa-solid fa-plus" />
               <span className="hidden md:inline">Add URL</span>
             </button>
-          </form>
+          </div>
 
-          {/* Error Message */}
+          {/* ========== ERROR MESSAGE ========== */}
           {errorMessage && (
-            <div className="mt-4 p-4 bg-red-500/10 border border-red-500/30 rounded-xl">
-              <p className="text-sm text-red-400 flex items-start gap-2">
-                <i className="fa-solid fa-exclamation-circle mt-0.5" />
-                <span>{errorMessage}</span>
-              </p>
-              <p className="text-xs text-gray-500 mt-2">
-                <strong>Tip:</strong> Try the "WP API" button to fetch posts directly, or use "Add URL" to add pages manually.
-              </p>
+            <div className="mt-4 p-4 bg-red-500/10 border border-red-500/30 rounded-2xl">
+              <div className="flex items-start gap-3">
+                <i className="fa-solid fa-exclamation-triangle text-red-400 mt-0.5" />
+                <div className="flex-1">
+                  <p className="text-sm text-red-400 font-medium">Discovery Error</p>
+                  <p className="text-xs text-gray-400 mt-1">{errorMessage}</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      onClick={handleWordPressAPI}
+                      className="px-4 py-2 bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 text-xs font-bold rounded-lg transition-all"
+                    >
+                      Try WordPress API →
+                    </button>
+                    <button
+                      onClick={() => setShowManualAdd(true)}
+                      className="px-4 py-2 bg-green-500/20 hover:bg-green-500/30 text-green-400 text-xs font-bold rounded-lg transition-all"
+                    >
+                      Add URLs Manually →
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
         </div>
       </header>
 
-      {/* Filter Tabs */}
+      {/* ========== FILTER TABS ========== */}
       {posts.length > 0 && (
         <div className="flex-shrink-0 border-b border-dark-800 bg-dark-900/30">
           <div className="max-w-6xl mx-auto px-6 md:px-8">
-            <div className="flex gap-1 overflow-x-auto py-4 scrollbar-hide">
+            <div className="flex gap-2 overflow-x-auto py-4 scrollbar-hide">
               {[
-                { id: 'all' as FilterTab, label: 'All', count: stats.total, color: 'gray' },
-                { id: 'critical' as FilterTab, label: 'Critical', count: stats.critical, color: 'red' },
-                { id: 'high' as FilterTab, label: 'High', count: stats.high, color: 'orange' },
-                { id: 'medium' as FilterTab, label: 'Medium', count: stats.medium, color: 'yellow' },
-                { id: 'low' as FilterTab, label: 'Low', count: stats.low, color: 'green' },
-                { id: 'monetized' as FilterTab, label: 'Monetized', count: stats.monetized, color: 'purple' },
+                { id: 'all' as FilterTab, label: 'All', count: stats.total, icon: 'fa-layer-group' },
+                { id: 'critical' as FilterTab, label: 'Critical', count: stats.critical, icon: 'fa-fire', color: 'red' },
+                { id: 'high' as FilterTab, label: 'High', count: stats.high, icon: 'fa-arrow-up', color: 'orange' },
+                { id: 'medium' as FilterTab, label: 'Medium', count: stats.medium, icon: 'fa-minus', color: 'yellow' },
+                { id: 'low' as FilterTab, label: 'Low', count: stats.low, icon: 'fa-arrow-down', color: 'green' },
+                { id: 'monetized' as FilterTab, label: 'Monetized', count: stats.monetized, icon: 'fa-check', color: 'purple' },
               ].map(tab => (
                 <button
                   key={tab.id}
                   onClick={() => setFilterTab(tab.id)}
                   className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-2 whitespace-nowrap ${
                     filterTab === tab.id
-                      ? 'bg-brand-500 text-white'
+                      ? 'bg-brand-500 text-white shadow-lg shadow-brand-500/25'
                       : 'bg-dark-800 text-gray-400 hover:bg-dark-700 hover:text-white'
                   }`}
                 >
+                  <i className={`fa-solid ${tab.icon}`} />
                   {tab.label}
                   <span className={`px-2 py-0.5 rounded-full text-[10px] ${
                     filterTab === tab.id ? 'bg-white/20' : 'bg-dark-700'
@@ -432,50 +408,60 @@ export const SitemapScanner: React.FC<SitemapScannerProps> = ({
                   </span>
                 </button>
               ))}
+              
+              {/* Deep Audit Button */}
+              <button
+                onClick={runDeepAudit}
+                disabled={status === 'auditing' || posts.length === 0}
+                className="ml-auto px-4 py-2 bg-violet-500/20 hover:bg-violet-500/30 text-violet-400 rounded-xl text-xs font-bold transition-all disabled:opacity-50 flex items-center gap-2"
+              >
+                <i className="fa-solid fa-microscope" />
+                Deep Audit
+              </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Post List */}
+      {/* ========== POST LIST ========== */}
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-6xl mx-auto p-6 md:p-8">
           {posts.length === 0 ? (
             <div className="py-20 text-center">
-              <div className="text-8xl text-dark-800 mb-6">
-                <i className="fa-solid fa-map" />
+              <div className="w-24 h-24 mx-auto mb-6 rounded-3xl bg-dark-800 flex items-center justify-center">
+                <i className="fa-solid fa-map text-4xl text-dark-600" />
               </div>
-              <h2 className="text-2xl font-black text-white mb-2">No Posts Yet</h2>
-              <p className="text-gray-500 max-w-md mx-auto">
-                Enter your domain or sitemap URL above and click "Discover" to find content.
-                Alternatively, use "WP API" to fetch directly from WordPress.
+              <h2 className="text-2xl font-black text-white mb-2">No Content Discovered</h2>
+              <p className="text-gray-500 max-w-md mx-auto mb-6">
+                Enter your domain above and click "Discover" to scan your sitemap,
+                or use "WP API" if you have WordPress credentials configured.
               </p>
+              <div className="flex justify-center gap-3">
+                <button
+                  onClick={() => setSitemapUrl('example.com')}
+                  className="px-4 py-2 bg-dark-800 hover:bg-dark-700 text-gray-400 hover:text-white rounded-lg text-sm transition-all"
+                >
+                  Try example.com
+                </button>
+              </div>
             </div>
           ) : (
             <>
-              {/* Search & Batch Actions */}
-              <div className="flex gap-4 mb-6 flex-wrap">
-                <div className="flex-1 min-w-[200px]">
-                  <div className="relative">
-                    <i className="fa-solid fa-search absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" />
-                    <input
-                      type="text"
-                      value={searchQuery}
-                      onChange={e => setSearchQuery(e.target.value)}
-                      placeholder="Search posts..."
-                      className="w-full bg-dark-800 border border-dark-700 rounded-xl pl-12 pr-4 py-3 text-white placeholder-gray-500 focus:border-brand-500 outline-none"
-                    />
-                  </div>
+              {/* Search Bar */}
+              <div className="flex gap-4 mb-6">
+                <div className="flex-1 relative">
+                  <i className="fa-solid fa-search absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={e => setSearchQuery(e.target.value)}
+                    placeholder="Search posts..."
+                    className="w-full bg-dark-800 border border-dark-700 rounded-xl pl-12 pr-4 py-3 text-white placeholder-gray-500 focus:border-brand-500 outline-none"
+                  />
                 </div>
-                
-                <button
-                  onClick={() => setShowBatchProcessor(true)}
-                  disabled={filteredPosts.length === 0}
-                  className="px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white font-bold rounded-xl transition-all disabled:opacity-50 flex items-center gap-2"
-                >
-                  <i className="fa-solid fa-bolt" />
-                  Batch Process ({filteredPosts.length})
-                </button>
+                <div className="text-sm text-gray-500 flex items-center">
+                  Showing {filteredPosts.length} of {posts.length}
+                </div>
               </div>
 
               {/* Posts Grid */}
@@ -520,7 +506,7 @@ export const SitemapScanner: React.FC<SitemapScannerProps> = ({
                       </div>
 
                       {/* Arrow */}
-                      <div className="text-gray-600 group-hover:text-brand-400 transition-colors">
+                      <div className="text-gray-600 group-hover:text-brand-400 group-hover:translate-x-1 transition-all">
                         <i className="fa-solid fa-chevron-right" />
                       </div>
                     </div>
@@ -532,48 +518,44 @@ export const SitemapScanner: React.FC<SitemapScannerProps> = ({
         </div>
       </div>
 
-      {/* Manual Add Modal */}
+      {/* ========== MANUAL ADD MODAL ========== */}
       {showManualAdd && (
-        <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-xl flex items-center justify-center p-4">
-          <div className="bg-dark-900 border border-dark-700 rounded-3xl p-8 max-w-lg w-full">
-            <h2 className="text-2xl font-black text-white mb-4">Add URL Manually</h2>
+        <div 
+          className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-xl flex items-center justify-center p-4"
+          onClick={e => e.target === e.currentTarget && setShowManualAdd(false)}
+        >
+          <div className="bg-dark-900 border border-dark-700 rounded-3xl p-8 max-w-lg w-full shadow-2xl">
+            <h2 className="text-2xl font-black text-white mb-2">Add URL Manually</h2>
+            <p className="text-sm text-gray-500 mb-6">
+              Enter the full URL of a page you want to monetize
+            </p>
+            
             <input
               type="text"
               value={manualUrl}
               onChange={e => setManualUrl(e.target.value)}
-              placeholder="https://example.com/blog-post"
-              className="w-full bg-dark-800 border border-dark-700 rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:border-brand-500 outline-none mb-4"
+              placeholder="https://example.com/blog-post-title"
+              className="w-full bg-dark-800 border border-dark-700 rounded-xl px-4 py-4 text-white placeholder-gray-500 focus:border-brand-500 outline-none mb-4"
               autoFocus
+              onKeyDown={e => e.key === 'Enter' && handleManualAdd()}
             />
+            
             <div className="flex gap-3">
               <button
                 onClick={() => setShowManualAdd(false)}
-                className="flex-1 px-6 py-3 bg-dark-800 text-white font-bold rounded-xl hover:bg-dark-700 transition-all"
+                className="flex-1 px-6 py-4 bg-dark-800 text-white font-bold rounded-xl hover:bg-dark-700 transition-all"
               >
                 Cancel
               </button>
               <button
                 onClick={handleManualAdd}
-                className="flex-1 px-6 py-3 bg-brand-600 text-white font-bold rounded-xl hover:bg-brand-500 transition-all"
+                className="flex-1 px-6 py-4 bg-brand-600 hover:bg-brand-500 text-white font-black rounded-xl transition-all"
               >
                 Add URL
               </button>
             </div>
           </div>
         </div>
-      )}
-
-      {/* Batch Processor Modal */}
-      {showBatchProcessor && (
-        <BatchProcessor
-          posts={filteredPosts}
-          config={config}
-          onComplete={(results) => {
-            console.log('[BatchProcessor] Complete:', results);
-            setShowBatchProcessor(false);
-          }}
-          onClose={() => setShowBatchProcessor(false)}
-        />
       )}
     </div>
   );
