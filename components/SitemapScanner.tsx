@@ -203,12 +203,10 @@ export const SitemapScanner: React.FC<SitemapScannerProps> = ({
   const handleManualAdd = () => {
     const validation = validateManualUrl(manualUrl);
     
-    if (!validation.isValid) {
-      showToast(validation.error || 'Invalid URL', 'error');
-      return;
-    }
-
-    if validation.normalizedUrl && (posts.some(p => p.url.toLowerCase() === validation.normalizedUrl.toLowerCase())) {
+    if (
+      validation.normalizedUrl &&
+      posts.some(p => p.url.toLowerCase() === validation.normalizedUrl!.toLowerCase())
+    ) {
       showToast('URL already in list', 'warning');
       return;
     }
@@ -425,7 +423,7 @@ export const SitemapScanner: React.FC<SitemapScannerProps> = ({
 
       {/* ========== POST LIST ========== */}
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-6xl mx-auto p-6 md:p-8">
+        <div className="max-w-6xl mx-auto p-6 md:px-8">
           {posts.length === 0 ? (
             <div className="py-20 text-center">
               <div className="w-24 h-24 mx-auto mb-6 rounded-3xl bg-dark-800 flex items-center justify-center">
