@@ -125,39 +125,6 @@ class IntelligenceCacheClass {
   }
 }
 
-  cleanup(): void {
-    this.cache.clear();
-    
-    try {
-      const keys = Object.keys(localStorage).filter(k => k.startsWith(CACHE_PREFIX));
-      keys.forEach(k => localStorage.removeItem(k));
-    } catch {}
-  }    
-    // Remove expired entries
-    expiredKeys.forEach(key => this.cache.delete(key));
-    
-    // Also clean up localStorage
-    try {
-      const keys = Object.keys(localStorage).filter(k => k.startsWith(CACHE_PREFIX));
-      keys.forEach(k => {
-        try {
-          const item = localStorage.getItem(k);
-          if (item) {
-            const parsed = JSON.parse(item);
-            if (parsed.timestamp && now > parsed.timestamp + (parsed.ttl || CACHE_TTL_MS)) {
-              localStorage.removeItem(k);
-            }
-          }
-        } catch {
-          // Invalid item, remove it
-          localStorage.removeItem(k);
-        }
-      });
-    } catch {
-      // localStorage not available
-    }
-  }
-
 export const IntelligenceCache = new IntelligenceCacheClass();
 
 /**
@@ -650,7 +617,7 @@ export const fetchPageContent = async (
     // Strategy 2: Proxy fetch
     const html = await fetchWithSmartProxy(url, { 
       timeout: PAGE_FETCH_TIMEOUT_MS,
-      }, (text: string) => text.length > 200);
+      });
     // Extract title
 const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
         let title = titleMatch 
@@ -2277,7 +2244,7 @@ export const validateManualUrl = (url: string): { isValid: boolean; normalizedUr
     if (!urlObj.hostname || urlObj.hostname.length < 3) {
       return { isValid: false, error: 'Invalid hostname' };
     }
-    return { isValid: true, normalizedUrl };
+    return { isValid: true, normalizedUrl: normalized };
   } catch {
     return { isValid: false, error: 'Invalid URL format' };
   }
@@ -2371,4 +2338,3 @@ export default {
   validateManualUrl,
   createBlogPostFromUrl,
 };
-2240
